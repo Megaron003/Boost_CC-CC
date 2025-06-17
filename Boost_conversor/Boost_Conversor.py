@@ -1,89 +1,79 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.integrate import odeint
 
-# 1. Definir parâmetros do projeto
-Vin = 12.0       # Tensão de entrada [V]
-Vout = 24.0      # Tensão de saída desejada [V]
-Pout = 50.0      # Potência de saída [W]
-fsw = 50e3       # Frequência de chaveamento [Hz]
-Ts = 1/fsw       # Período de chaveamento [s]
-delta_IL = 0.3   # Ondulação de corrente no indutor (30% da corrente média)
-delta_Vout = 0.02 # Ondulação de tensão na saída (2% da tensão de saída)
+# Parâmetros do conversor Boost
+Vin = 12              # Tensão de entrada [V]
+Vout = 36             # Tensão de saída [V]
+Po = 108              # Potência de saída [W]
+fs = 100e3            # Frequência de chaveamento [Hz]
+T = 1 / fs            # Período de chaveamento [s]
 
-# 2. Cálculos preliminares
-D = 1 - (Vin / Vout)  # Razão cíclica
-Iout = Pout / Vout     # Corrente de saída
-Iin = Pout / Vin       # Corrente de entrada
-Rload = Vout**2 / Pout # Resistência de carga
+# 1. Razão cíclica
+D = 1 - (Vin / Vout)
 
-# 3. Dimensionamento dos componentes
-L = (Vin * D * Ts) / (delta_IL * Iin)          # Indutância
-C = (Iout * D * Ts) / (delta_Vout * Vout)      # Capacitância
+# 2. Corrente de saída
+Io = Po / Vout
 
-print("Parâmetros do projeto:")
-print(f"Razão cíclica D: {D:.4f}")
-print(f"Indutância L: {L*1e6:.2f} µH")
-print(f"Capacitância C: {C*1e6:.2f} µF")
+# 3. Corrente de entrada média
+Iin = Po / Vin
 
-# 4. Simulação do conversor
-def boost_converter(x, t, D, Ts, Vin, Rload, L, C):
-    iL, vC = x
-    
-    # Determina o estado do interruptor
-    if (t % Ts) < (D * Ts):
-        # Primeira etapa - S fechado
-        diLdt = Vin / L
-        dvCdt = -vC / (Rload * C)
-    else:
-        # Segunda etapa - S aberto
-        diLdt = (Vin - vC) / L
-        dvCdt = (iL - vC/Rload) / C
-    
-    return [diLdt, dvCdt]
+# 4. Ondulação no indutor (30%)
+delta_IL = 0.3 * Iin
 
-# Configuração da simulação
-t_sim = np.linspace(0, 0.01, 10000)  # 10ms de simulação
-x0 = [Iin, Vin]  # Condições iniciais
+# 5. Indutância
+L = (Vin * D) / (fs * delta_IL)
 
-# Executar simulação
-sol = odeint(boost_converter, x0, t_sim, args=(D, Ts, Vin, Rload, L, C))
-iL_sim, vC_sim = sol.T
+# 6. Ondulação na tensão de saída (2%)
+delta_Vo = 0.02 * Vout
 
-# 5. Visualização dos resultados
+# 7. Capacitância mínima
+C = (Io * D) / (fs * delta_Vo)
+
+# Mostrar valores calculados
+print(f"Razão Cíclica (D): {D:.4f}")
+print(f"Corrente de entrada: {Iin:.2f} A")
+print(f"Corrente de saída: {Io:.2f} A")
+print(f"Ondulação de corrente: {delta_IL:.2f} A")
+print(f"Indutor necessário: {L * 1e6:.2f} µH")
+print(f"Capacitor necessário: {C * 1e6:.2f} µF")
+
+# 8. Simulação do comportamento do indutor
+t = np.linspace(0, 2*T, 1000)  # 2 ciclos
+IL = Iin + (delta_IL/2) * np.sign(np.sin(2 * np.pi * fs * t))  # Corrente idealizada
+
+# 9. Tensão de saída com ondulação simulada
+Vo = Vout + (delta_Vo/2) * np.sin(2 * np.pi * fs * t)
+
+# 10. Corrente no diodo
+Id = np.where(np.mod(t, T) > D*T, IL, 0)
+
+# Gráficos
 plt.figure(figsize=(12, 8))
 
 # Corrente no indutor
-plt.subplot(2, 1, 1)
-plt.plot(t_sim*1000, iL_sim)
-plt.title('Corrente no Indutor')
-plt.xlabel('Tempo [ms]')
+plt.subplot(3, 1, 1)
+plt.plot(t * 1e6, IL, label='Corrente no Indutor', color='blue')
 plt.ylabel('Corrente [A]')
+plt.title('Corrente no Indutor')
 plt.grid(True)
+plt.legend()
 
-# Tensão de saída
-plt.subplot(2, 1, 2)
-plt.plot(t_sim*1000, vC_sim)
-plt.title('Tensão de Saída')
-plt.xlabel('Tempo [ms]')
+# Tensão de saída com ondulação
+plt.subplot(3, 1, 2)
+plt.plot(t * 1e6, Vo, label='Tensão de Saída', color='green')
 plt.ylabel('Tensão [V]')
+plt.title('Tensão de Saída com Ondulação')
 plt.grid(True)
+plt.legend()
+
+# Corrente no diodo
+plt.subplot(3, 1, 3)
+plt.plot(t * 1e6, Id, label='Corrente no Diodo', color='red')
+plt.xlabel('Tempo [µs]')
+plt.ylabel('Corrente [A]')
+plt.title('Corrente no Diodo')
+plt.grid(True)
+plt.legend()
 
 plt.tight_layout()
 plt.show()
-
-# 6. Análise em regime permanente
-steady_state_start = int(0.8 * len(t_sim))
-iL_ss = iL_sim[steady_state_start:]
-vC_ss = vC_sim[steady_state_start:]
-
-iL_avg = np.mean(iL_ss)
-vC_avg = np.mean(vC_ss)
-iL_ripple = np.max(iL_ss) - np.min(iL_ss)
-vC_ripple = np.max(vC_ss) - np.min(vC_ss)
-
-print("\nResultados em regime permanente:")
-print(f"Tensão média de saída: {vC_avg:.2f} V (desejado: {Vout} V)")
-print(f"Corrente média no indutor: {iL_avg:.2f} A (teórico: {Iin:.2f} A)")
-print(f"Ripple de corrente no indutor: {iL_ripple:.2f} A ({iL_ripple/iL_avg*100:.1f}%)")
-print(f"Ripple de tensão na saída: {vC_ripple:.2f} V ({vC_ripple/vC_avg*100:.1f}%)")
